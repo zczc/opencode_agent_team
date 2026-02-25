@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import sys
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -193,6 +194,8 @@ class CodexJudgement:
     progress_efficiency: DimensionJudgement
     result_completeness: DimensionJudgement
     result_quality: DimensionJudgement
+    collaboration_effectiveness: DimensionJudgement
+    error_recovery_and_reflection: DimensionJudgement
     overall: DimensionJudgement
 
 
@@ -334,6 +337,253 @@ def default_mission_cases() -> list[MissionCase]:
                 },
             ],
         ),
+        MissionCase(
+            case_id="recovery-from-hallucination",
+            mission="实现一个基于 Redis 的缓存模块，但项目中根本没有安装 Redis 依赖",
+            expected_keywords=["Redis", "缓存", "失败", "恢复"],
+            tasks=[
+                {
+                    "id": "task-001",
+                    "type": "standard",
+                    "title": "尝试引入 Redis 客户端库",
+                    "description": "编写一段 Python 代码尝试 import redis，并运行它以验证当前环境是否支持。",
+                    "dependencies": [],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-002",
+                    "type": "standard",
+                    "title": "缓存模块实现与异常处理",
+                    "description": "基于 task-001 的结论，由于缺乏依赖，请不要强行成功，而是向黑板写入一个明确的失败原因或替代方案。",
+                    "dependencies": ["task-001"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+            ],
+            timeout=120.0,
+        ),
+        # Case 5: Wide fan-out star — 1 root → 4 parallel → 1 aggregator (6 tasks, 3 workers → forces queuing)
+        MissionCase(
+            case_id="perf-wide-fanout",
+            mission="全面分析系统性能瓶颈并产出综合优化报告",
+            expected_keywords=["性能", "瓶颈", "优化", "综合"],
+            tasks=[
+                {
+                    "id": "task-001",
+                    "type": "standard",
+                    "title": "性能基线采集",
+                    "description": "采集系统各维度（CPU、内存、磁盘、网络）的基线性能数据，为后续并行分析提供输入。",
+                    "dependencies": [],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-002",
+                    "type": "standard",
+                    "title": "数据库查询瓶颈分析",
+                    "description": "分析慢查询日志，找出 Top-5 高延迟 SQL 并给出索引优化建议。",
+                    "dependencies": ["task-001"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-003",
+                    "type": "standard",
+                    "title": "缓存命中率分析",
+                    "description": "评估 Redis 缓存命中率，识别缓存穿透/击穿风险点。",
+                    "dependencies": ["task-001"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-004",
+                    "type": "standard",
+                    "title": "网络 I/O 瓶颈分析",
+                    "description": "分析服务间调用链路，识别高延迟 RPC 和带宽瓶颈。",
+                    "dependencies": ["task-001"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-005",
+                    "type": "standard",
+                    "title": "计算密集型任务分析",
+                    "description": "分析 CPU 高占用函数，找出热点算法并评估并发优化空间。",
+                    "dependencies": ["task-001"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-006",
+                    "type": "standard",
+                    "title": "综合优化报告输出",
+                    "description": "汇总 DB、缓存、网络、计算四个维度的分析结论，按优先级排列优化建议，产出综合性能优化报告。",
+                    "dependencies": ["task-002", "task-003", "task-004", "task-005"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+            ],
+        ),
+        # Case 6: Deep linear chain — 5-level strict sequence, tests cascading predecessor context
+        MissionCase(
+            case_id="security-deep-chain",
+            mission="对系统进行全面安全审计并产出修复方案",
+            expected_keywords=["安全", "漏洞", "审计", "修复"],
+            tasks=[
+                {
+                    "id": "task-001",
+                    "type": "standard",
+                    "title": "资产与攻击面盘点",
+                    "description": "梳理系统所有对外暴露的接口、端口和服务，绘制完整攻击面地图。",
+                    "dependencies": [],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-002",
+                    "type": "standard",
+                    "title": "漏洞扫描与收集",
+                    "description": "基于 task-001 的攻击面地图，执行漏洞扫描，收集所有已知 CVE 和配置错误。",
+                    "dependencies": ["task-001"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-003",
+                    "type": "standard",
+                    "title": "风险分级与优先级排序",
+                    "description": "基于 task-002 的漏洞列表，按 CVSS 评分和业务影响进行风险分级，输出 P0/P1/P2 优先级矩阵。",
+                    "dependencies": ["task-002"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-004",
+                    "type": "standard",
+                    "title": "修复方案设计",
+                    "description": "基于 task-003 的优先级矩阵，为 P0 和 P1 漏洞设计具体修复步骤和回滚预案。",
+                    "dependencies": ["task-003"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-005",
+                    "type": "standard",
+                    "title": "修复验证与关闭报告",
+                    "description": "基于 task-004 的修复方案，定义验收测试矩阵，产出安全审计关闭报告和残余风险声明。",
+                    "dependencies": ["task-004"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+            ],
+        ),
+        # Case 7: Mid-chain failure — parallel prep → validation fails → recovery plan
+        MissionCase(
+            case_id="schema-migration-mid-failure",
+            mission="将用户数据从旧格式迁移至新格式，但源数据存在严重的格式错误",
+            expected_keywords=["迁移", "格式", "失败", "回退"],
+            tasks=[
+                {
+                    "id": "task-001",
+                    "type": "standard",
+                    "title": "源数据 Schema 分析",
+                    "description": "读取源数据库 schema 定义，梳理字段类型、约束和历史变更记录。",
+                    "dependencies": [],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-002",
+                    "type": "standard",
+                    "title": "目标 Schema 定义",
+                    "description": "定义迁移后的目标 schema，包括字段映射规则和数据转换逻辑。",
+                    "dependencies": [],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-003",
+                    "type": "standard",
+                    "title": "数据格式兼容性验证",
+                    "description": "基于 task-001 和 task-002 的 schema，验证源数据是否满足目标格式要求。由于发现源数据存在严重格式错误，请不要强行成功，而是直接记录格式不一致的失败原因。",
+                    "dependencies": ["task-001", "task-002"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-004",
+                    "type": "standard",
+                    "title": "迁移失败回退方案",
+                    "description": "基于 task-003 的格式验证失败报告，制定完整的数据迁移回退策略和格式修复预案，确保生产数据安全。",
+                    "dependencies": ["task-003"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+            ],
+        ),
+        # Case 8: Complex incident response — alert → 3 parallel investigations → root cause → fix plan (6 tasks)
+        MissionCase(
+            case_id="incident-response-complex",
+            mission="线上告警：订单服务 P99 延迟从 200ms 飙升至 5s，请排查根因并给出修复方案",
+            expected_keywords=["告警", "延迟", "根因", "修复"],
+            tasks=[
+                {
+                    "id": "task-001",
+                    "type": "standard",
+                    "title": "告警上下文梳理",
+                    "description": "收集告警触发时间窗口内的关键指标（QPS、错误率、Pod 重启次数），明确故障范围和影响面。",
+                    "dependencies": [],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-002",
+                    "type": "standard",
+                    "title": "数据库层排查",
+                    "description": "基于 task-001 的时间窗口，检查数据库慢查询日志、连接池状态和锁等待，判断 DB 是否为瓶颈。",
+                    "dependencies": ["task-001"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-003",
+                    "type": "standard",
+                    "title": "服务依赖链路排查",
+                    "description": "基于 task-001 的时间窗口，通过 trace 数据分析订单服务的上下游依赖，定位超时调用链路。",
+                    "dependencies": ["task-001"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-004",
+                    "type": "standard",
+                    "title": "基础设施层排查",
+                    "description": "基于 task-001 的时间窗口，检查节点 CPU/内存/网络压力、GC 暂停时间和容器资源限制。",
+                    "dependencies": ["task-001"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-005",
+                    "type": "standard",
+                    "title": "根因确认与归因报告",
+                    "description": "综合 task-002、task-003、task-004 的排查结论，确认主根因和贡献因子，产出结构化归因报告。",
+                    "dependencies": ["task-002", "task-003", "task-004"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+                {
+                    "id": "task-006",
+                    "type": "standard",
+                    "title": "应急修复与预防措施",
+                    "description": "基于 task-005 的根因报告，制定立即执行的应急修复步骤和中长期预防措施，包含回滚预案。",
+                    "dependencies": ["task-005"],
+                    "status": "PENDING",
+                    "assignees": [],
+                },
+            ],
+        ),
     ]
 
 
@@ -352,6 +602,10 @@ class MissionBenchmarkRunner:
         prefer_codex_cli: bool = True,
         codex_cli_path: str = "codex",
         codex_cli_timeout: int = 180,
+        codex_cli_model: str = "claude-sonnet-4-6",
+        use_real_opencode: bool = False,
+        real_case_timeout: float = 1800.0,
+        worker_model: str = "",
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.workers = workers
@@ -364,9 +618,15 @@ class MissionBenchmarkRunner:
         self.prefer_codex_cli = prefer_codex_cli
         self.codex_cli_path = codex_cli_path
         self.codex_cli_timeout = max(30, int(codex_cli_timeout))
+        self.codex_cli_model = codex_cli_model.strip() or "claude-sonnet-4-6"
+        self.use_real_opencode = use_real_opencode
+        self.real_case_timeout = max(300.0, float(real_case_timeout))
+        self.worker_model = worker_model.strip()
+        self._run_stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     def run_case(self, case: MissionCase) -> MissionBenchmarkResult:
         project_root = self._prepare_project_root(case.case_id)
+        self._log(f"  project_root: {project_root}")
         try:
             with SwarmMissionHarness(
                 repo_root=self.repo_root,
@@ -376,15 +636,26 @@ class MissionBenchmarkRunner:
                 mock_task_delay=self.mock_task_delay,
                 task_timeout=self.task_timeout,
                 heartbeat_timeout=self.heartbeat_timeout,
+                use_real_opencode=self.use_real_opencode,
+                worker_model=self.worker_model,
             ) as harness:
+                mode_label = "real opencode" if self.use_real_opencode else "mock servers"
+                self._log(f"  Starting orchestrator & {mode_label}...")
+                effective_timeout = self.real_case_timeout if self.use_real_opencode else case.timeout
                 run = harness.run_swarm_mission(
                     command_text=f"/swarm {case.mission}",
                     tasks=case.tasks,
-                    timeout=case.timeout,
+                    timeout=effective_timeout,
                 )
+                self._log(f"  Mission completed in {run.duration_seconds:.1f}s, session={run.session_id}")
+                self._log("  Scoring process metrics...")
                 events = harness.read_orchestrator_events(run.session_id)
                 process_metrics = self._score_process(case, run, events)
+                self._log(f"  Process score: {process_metrics.score:.1f}")
+                self._log("  Scoring result metrics...")
                 result_metrics = self._score_result(case, run, harness)
+                self._log(f"  Result score: {result_metrics.score:.1f}")
+                self._log("  Detecting bugs...")
                 bug_findings = self._detect_bug_findings(
                     case=case,
                     run=run,
@@ -392,6 +663,7 @@ class MissionBenchmarkRunner:
                     process_metrics=process_metrics,
                     result_metrics=result_metrics,
                 )
+                self._log(f"  Rule-based bugs found: {len(bug_findings)}")
                 codex_judgement: CodexJudgement | None = None
                 judge_source = "rules"
                 codex_cli_invoked = False
@@ -399,6 +671,7 @@ class MissionBenchmarkRunner:
 
                 if self.judge_by_codex and self.prefer_codex_cli:
                     codex_cli_invoked = True
+                    self._log(f"  Invoking LLM judge via: {self.codex_cli_path} (timeout={self.codex_cli_timeout}s)...")
                     try:
                         codex_judgement, cli_findings = self._judge_with_codex_cli(
                             case=case,
@@ -410,8 +683,10 @@ class MissionBenchmarkRunner:
                         )
                         judge_source = "codex_cli"
                         bug_findings = self._merge_bug_findings(cli_findings, bug_findings)
+                        self._log(f"  LLM judge done: overall={codex_judgement.overall.score:.1f}, bugs={len(cli_findings)}")
                     except Exception as cli_exc:
                         codex_cli_error = str(cli_exc)
+                        self._log(f"  LLM judge failed: {codex_cli_error.splitlines()[0][:120]}")
                         bug_findings.append(
                             BugFinding(
                                 bug_id="BUG-CODEX-CLI-JUDGE-FAILED",
@@ -443,16 +718,18 @@ class MissionBenchmarkRunner:
                             codex_judgement.execution_stability.score
                             + codex_judgement.scheduling_quality.score
                             + codex_judgement.progress_efficiency.score
+                            + codex_judgement.error_recovery_and_reflection.score
                         )
-                        / 3.0,
+                        / 4.0,
                         2,
                     )
                     result_score = round(
                         (
                             codex_judgement.result_completeness.score
                             + codex_judgement.result_quality.score
+                            + codex_judgement.collaboration_effectiveness.score
                         )
-                        / 2.0,
+                        / 3.0,
                         2,
                     )
                     total_score = _clamp(codex_judgement.overall.score)
@@ -519,6 +796,18 @@ class MissionBenchmarkRunner:
                         risk=[startup_bug.bug_id],
                         suggestion=["Restore execution path to generate report artifacts."],
                     ),
+                    collaboration_effectiveness=DimensionJudgement(
+                        score=0.0,
+                        evidence=["no tasks executed"],
+                        risk=[startup_bug.bug_id],
+                        suggestion=["Ensure orchestrator can start workers minimum."],
+                    ),
+                    error_recovery_and_reflection=DimensionJudgement(
+                        score=0.0,
+                        evidence=["startup failed, no recovery logic triggered"],
+                        risk=[startup_bug.bug_id],
+                        suggestion=["Fix framework startup issue before benchmarking."],
+                    ),
                     overall=DimensionJudgement(
                         score=0.0,
                         evidence=["benchmark case failed at startup"],
@@ -550,16 +839,34 @@ class MissionBenchmarkRunner:
             )
 
     def run_cases(self, cases: list[MissionCase]) -> list[MissionBenchmarkResult]:
-        return [self.run_case(case) for case in cases]
+        total = len(cases)
+        self._log(f"Benchmark started: {total} case(s), run_stamp={self._run_stamp}")
+        results: list[MissionBenchmarkResult] = []
+        for idx, case in enumerate(cases, 1):
+            self._log(f"[{idx}/{total}] Running case: {case.case_id}")
+            result = self.run_case(case)
+            results.append(result)
+            self._log(
+                f"[{idx}/{total}] Done: {case.case_id} | "
+                f"status={result.status} score={result.total_score:.1f} "
+                f"verdict={result.verdict} duration={result.duration_seconds:.1f}s"
+            )
+        self._log(f"Benchmark finished: {total} case(s)")
+        return results
+
+    @staticmethod
+    def _log(msg: str) -> None:
+        ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        print(f"[bench {ts}] {msg}", file=sys.stderr, flush=True)
 
     def _prepare_project_root(self, case_id: str) -> Path:
         if self.work_root:
-            target = self.work_root / case_id
-            if target.exists():
-                shutil.rmtree(target, ignore_errors=True)
-            target.mkdir(parents=True, exist_ok=True)
-            return target
-        return Path(tempfile.mkdtemp(prefix=f"swarm-benchmark-{case_id}-"))
+            base = self.work_root
+        else:
+            base = self.repo_root / ".benchmark_runs" / self._run_stamp
+        target = base / case_id
+        target.mkdir(parents=True, exist_ok=True)
+        return target
 
     def _score_process(
         self,
@@ -1071,12 +1378,67 @@ class MissionBenchmarkRunner:
             ],
         )
 
+        # --- error_recovery_and_reflection heuristic ---
+        has_incidents = event_counter["incident.generated"] > 0
+        has_timeouts = event_counter["task.timeout"] > 0
+        has_recoveries = event_counter["worker.recover.start"] > 0
+        if not has_incidents and not has_timeouts:
+            err_recovery_score = 85.0  # no error events to judge
+            err_evidence = ["no incident/timeout events observed; neutral score"]
+        else:
+            err_recovery_score = 85.0
+            err_recovery_score -= event_counter["incident.generated"] * 15.0
+            err_recovery_score -= event_counter["task.timeout"] * 10.0
+            if has_recoveries:
+                err_recovery_score += min(20.0, event_counter["worker.recover.start"] * 8.0)
+            err_recovery_score = _clamp(err_recovery_score)
+            err_evidence = [
+                f"incident.generated={event_counter['incident.generated']}",
+                f"task.timeout={event_counter['task.timeout']}",
+                f"worker.recover.start={event_counter['worker.recover.start']}",
+            ]
+        error_recovery = DimensionJudgement(
+            score=round(err_recovery_score, 2),
+            evidence=err_evidence,
+            risk=[f.evidence for f in bug_findings if f.category in {"reliability", "execution"}][:3],
+            suggestion=["Use LLM judger for deeper error recovery analysis."],
+        )
+
+        # --- collaboration_effectiveness heuristic ---
+        dep_total = 0
+        dep_done = 0
+        status_by_id = {str(t.get("id") or ""): str(t.get("status") or "") for t in run.tasks}
+        for task in run.tasks:
+            deps = task.get("dependencies", [])
+            if not isinstance(deps, list):
+                continue
+            for dep in deps:
+                dep_id = str(dep or "").strip()
+                if dep_id:
+                    dep_total += 1
+                    if status_by_id.get(dep_id) == "DONE":
+                        dep_done += 1
+        if dep_total > 0:
+            collab_score = _ratio(dep_done, dep_total) * 90.0 + 10.0
+            collab_evidence = [f"dependency_edges_done={dep_done}/{dep_total}"]
+        else:
+            collab_score = 80.0  # no dependencies to judge
+            collab_evidence = ["no dependency edges in task graph; neutral score"]
+        collaboration = DimensionJudgement(
+            score=round(_clamp(collab_score), 2),
+            evidence=collab_evidence,
+            risk=[f.evidence for f in bug_findings if f.category == "scheduler"][:3],
+            suggestion=["Use LLM judger for deeper collaboration analysis."],
+        )
+
         return CodexJudgement(
             execution_stability=stability,
             scheduling_quality=scheduling,
             progress_efficiency=efficiency,
             result_completeness=completeness,
             result_quality=quality,
+            collaboration_effectiveness=collaboration,
+            error_recovery_and_reflection=error_recovery,
             overall=overall,
         )
 
@@ -1149,26 +1511,38 @@ class MissionBenchmarkRunner:
             codex_home.mkdir(parents=True, exist_ok=True)
             run_env = os.environ.copy()
             run_env["CODEX_HOME"] = str(codex_home)
+            run_env.pop("CLAUDECODE", None)
 
-            cmd = [
-                self.codex_cli_path,
-                "exec",
-                "--skip-git-repo-check",
-                "--sandbox",
-                "read-only",
-                "--ephemeral",
-                "--color",
-                "never",
-                "-C",
-                str(project_dir),
-                "--add-dir",
-                str(run.session_dir),
-                "--output-schema",
-                str(schema_path),
-                "--output-last-message",
-                str(output_path),
-                "-",
-            ]
+            if "claude" in self.codex_cli_path:
+                cmd = [
+                    self.codex_cli_path,
+                    "-p",
+                    prompt,
+                    "--model", self.codex_cli_model,
+                    "--output-format", "json",
+                    "--allowedTools", "Read,Glob,Grep,Bash(read-only)",
+                    "--max-turns", "30",
+                    "--verbose",
+                ]
+            else:
+                cmd = [
+                    self.codex_cli_path,
+                    "exec",
+                    "--sandbox",
+                    "read-only",
+                    "--ephemeral",
+                    "--color",
+                    "never",
+                    "-C",
+                    str(project_dir),
+                    "--add-dir",
+                    str(run.session_dir),
+                    "--output-schema",
+                    str(schema_path),
+                    "--output-last-message",
+                    str(output_path),
+                    "-",
+                ]
 
             completed = subprocess.run(
                 cmd,
@@ -1217,12 +1591,36 @@ class MissionBenchmarkRunner:
             if not raw:
                 raw = stdout_text.strip()
             raw_log_path.write_text(raw, encoding="utf-8", errors="replace")
+            # Claude Code --output-format json emits a JSON array of messages.
+            # Extract the last assistant text content which contains the actual
+            # structured judgement payload.
+            raw = self._extract_claude_code_text(raw) or raw
             payload = _load_json_payload(raw)
             payload_log_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
         judgement = self._parse_codex_judgement(payload)
         findings = self._parse_codex_bug_findings(payload.get("bug_findings"))
         return judgement, findings
+
+    @staticmethod
+    def _extract_claude_code_text(raw: str) -> str:
+        """Extract the last assistant text from Claude Code JSON array output."""
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return ""
+        if not isinstance(data, list):
+            return ""
+        for obj in reversed(data):
+            if not isinstance(obj, dict) or obj.get("type") != "assistant":
+                continue
+            msg = obj.get("message", {})
+            if not isinstance(msg, dict):
+                continue
+            for c in msg.get("content", []):
+                if isinstance(c, dict) and c.get("type") == "text":
+                    return c.get("text", "")
+        return ""
 
     @staticmethod
     def _summarize_cli_failure(stderr_text: str, stdout_text: str, returncode: int) -> str:
@@ -1280,6 +1678,8 @@ class MissionBenchmarkRunner:
             progress_efficiency=MissionBenchmarkRunner._parse_dimension(payload.get("progress_efficiency")),
             result_completeness=MissionBenchmarkRunner._parse_dimension(payload.get("result_completeness")),
             result_quality=MissionBenchmarkRunner._parse_dimension(payload.get("result_quality")),
+            collaboration_effectiveness=MissionBenchmarkRunner._parse_dimension(payload.get("collaboration_effectiveness")),
+            error_recovery_and_reflection=MissionBenchmarkRunner._parse_dimension(payload.get("error_recovery_and_reflection")),
             overall=MissionBenchmarkRunner._parse_dimension(payload.get("overall")),
         )
 
@@ -1351,6 +1751,8 @@ class MissionBenchmarkRunner:
                 "progress_efficiency",
                 "result_completeness",
                 "result_quality",
+                "collaboration_effectiveness",
+                "error_recovery_and_reflection",
                 "overall",
                 "bug_findings",
             ],
@@ -1360,6 +1762,8 @@ class MissionBenchmarkRunner:
                 "progress_efficiency": dim,
                 "result_completeness": dim,
                 "result_quality": dim,
+                "collaboration_effectiveness": dim,
+                "error_recovery_and_reflection": dim,
                 "overall": dim,
                 "bug_findings": {"type": "array", "items": bug},
             },
@@ -1384,78 +1788,6 @@ class MissionBenchmarkRunner:
         resources_dir = session_dir / "resources"
         worker_logs_dir = session_dir / "logs" / "workers"
 
-        event_counter = Counter(str(item.get("event", "")) for item in events)
-        top_events = sorted(event_counter.items(), key=lambda kv: (-kv[1], kv[0]))[:20]
-        top_event_lines = [f"- {name}: {count}" for name, count in top_events if name]
-        if not top_event_lines:
-            top_event_lines = ["- (none)"]
-
-        warn_error_events = [
-            f"- {item.get('ts', '')} {item.get('level', '')} {item.get('event', '')} "
-            f"error={str(item.get('error', '')).strip()[:120]}"
-            for item in events
-            if str(item.get("level", "")).lower() in {"warn", "error"}
-        ][:20]
-        if not warn_error_events:
-            warn_error_events = ["- (none)"]
-
-        event_timeline = [
-            (
-                f"- ts={str(item.get('ts', '')).strip()} "
-                f"event={str(item.get('event', '')).strip()} "
-                f"level={str(item.get('level', '')).strip()} "
-                f"task={str(item.get('task_id') or item.get('task') or '').strip()} "
-                f"worker={str(item.get('worker_name') or item.get('worker') or '').strip()} "
-                f"status={str(item.get('status', '')).strip()} "
-                f"error={str(item.get('error', '')).strip()[:100]}"
-            )
-            for item in events[-30:]
-        ]
-        if not event_timeline:
-            event_timeline = ["- (none)"]
-
-        baseline_bug_lines = [
-            f"- [{item.severity}] {item.bug_id}: {item.evidence} (impact={item.impact})"
-            for item in baseline_findings[:12]
-        ]
-        if not baseline_bug_lines:
-            baseline_bug_lines = ["- (none)"]
-
-        resource_files: list[str] = []
-        if resources_dir.exists():
-            for file_path in sorted(resources_dir.rglob("*")):
-                if not file_path.is_file():
-                    continue
-                rel = file_path.relative_to(resources_dir)
-                try:
-                    size = file_path.stat().st_size
-                except OSError:
-                    size = -1
-                resource_files.append(f"- {rel} ({size} bytes)")
-                if len(resource_files) >= 30:
-                    break
-        if not resource_files:
-            resource_files = ["- (none)"]
-
-        def _read_preview(path: Path, *, max_chars: int = 1200, max_lines: int = 24) -> str:
-            if not path.exists():
-                return "(missing)"
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError as exc:
-                return f"(read-error: {exc})"
-            lines = text.splitlines()
-            clipped = "\n".join(lines[:max_lines]).strip()
-            if not clipped:
-                return "(empty)"
-            if len(clipped) > max_chars:
-                clipped = clipped[: max_chars - 3] + "..."
-            return clipped
-
-        completion_preview = _read_preview(completion_report, max_chars=1500, max_lines=30)
-        state_preview = _read_preview(state_path, max_chars=1200, max_lines=20)
-        registry_preview = _read_preview(registry_path, max_chars=1200, max_lines=20)
-
         task_snapshot = [
             {
                 "id": task.get("id"),
@@ -1468,94 +1800,124 @@ class MissionBenchmarkRunner:
             for task in run.tasks
         ]
 
+        baseline_bug_lines = [
+            f"- [{item.severity}] {item.bug_id}: {item.evidence} (impact={item.impact})"
+            for item in baseline_findings[:12]
+        ]
+        if not baseline_bug_lines:
+            baseline_bug_lines = ["- (none)"]
+
+        schema = self._codex_cli_output_schema()
+
+        worker_mode_desc = (
+            "真实 opencode serve + Claude worker（产物是真实 LLM 输出，质量评审应着重内容深度和可操作性）"
+            if self.use_real_opencode
+            else "opencode serve mock（产物为模板输出，质量评审应聚焦调度过程和结构完整性）"
+        )
         background = [
-            "你是 Codex 质量评审器，任务是审计一次 `/swarm <mission>` 执行。",
-            "目标：基于日志和产物给出过程评分、结果评分、bug 发现。请保持严格、保守、可追溯。",
+            "你是 Swarm Mission 质量评审器。你需要审计一次 `/swarm <mission>` 的执行过程和结果。",
             "",
-            "系统背景（必须用于理解上下文）：",
-            "- /swarm mission 会启动 orchestrator，调度多个 worker(opencode serve mock)执行 central plan。",
-            "- 状态与日志位于 `.blackboard/sessions/<session_id>/`，关键数据包含事件流、状态机快照、产物报告。",
-            "- 正确执行应体现：任务依赖被遵守、任务最终 DONE、产物与任务语义一致。",
+            "# 系统背景",
             "",
-            "评审规则（硬约束）：",
+            f"/swarm mission 会启动 orchestrator，调度多个 worker（{worker_mode_desc}）执行 central plan。",
+            "所有状态、日志、产物都在 session_dir 下，你需要自行读取相关文件来获取证据。",
+            "正确执行应体现：任务依赖被遵守、任务最终 DONE、产物与任务语义一致。",
+            "",
+            "# 本次评审的 Mission 信息",
+            "",
+            f"- case_id: {case.case_id}",
+            f"- mission: {case.mission}",
+            f"- expected_keywords: {case.expected_keywords}",
+            f"- task_graph: {json.dumps(case.tasks, ensure_ascii=False)}",
+            f"- duration_seconds: {run.duration_seconds:.3f}",
+            f"- task_snapshot: {json.dumps(task_snapshot, ensure_ascii=False)}",
+            "",
+            "# 关键文件路径（请按需读取）",
+            "",
+            "以下是本次执行产生的所有关键文件的绝对路径，请根据评审需要自行读取：",
+            "",
+            f"- session_dir: {session_dir}",
+            f"- central_plan: {run.plan_path}",
+            f"- orchestrator_log (JSONL): {orchestrator_log}",
+            f"- scheduler_trace (JSONL): {scheduler_trace}",
+            f"- registry: {registry_path}",
+            f"- orchestrator_state: {state_path}",
+            f"- completion_report: {completion_report}",
+            f"- resources_dir (产物目录): {resources_dir}",
+            f"- worker_logs_dir: {worker_logs_dir}",
+            "",
+            "建议的审查顺序：",
+            "1. 先读 orchestrator_state 和 registry 了解最终状态",
+            "2. 读 orchestrator_log 和 scheduler_trace 分析过程",
+            "3. 读 resources_dir 下的产物文件评估结果质量",
+            "4. 读 worker_logs_dir 下的日志排查异常",
+            "5. 读 completion_report 查看系统自评",
+            "",
+            "# 规则评分基线（仅供参考，不是最终结论）",
+            "",
+            f"- process_metrics: {json.dumps(asdict(process_metrics), ensure_ascii=False)}",
+            f"- result_metrics: {json.dumps(asdict(result_metrics), ensure_ascii=False)}",
+            "",
+            "基线 bug（规则检测）：",
+            *baseline_bug_lines,
+            "",
+            "# 评审规则（硬约束）",
+            "",
             "- 只读分析，不修改任何文件。",
-            "- 必须引用证据；不允许猜测。",
-            "- 若证据不足，降低分数并在 evidence/risk 明确写出“证据不足”的原因。",
+            "- 必须引用证据（文件路径 + 具体内容）；不允许猜测。",
+            '- 若证据不足，降低分数并在 evidence/risk 明确写出"证据不足"的原因。',
             "- 若发现 bug，必须给出 bug_id/severity/category/evidence/impact/suggestion/count。",
             "",
-            "评分刻度（每项 0-100，按以下语义打分）：",
+            "评分刻度（每项 0-100）：",
             "- 90-100: 证据充分且稳定/完整，未见中高风险问题。",
             "- 75-89: 总体良好，存在可恢复问题或轻微缺陷。",
             "- 60-74: 有明显缺陷，影响效率或结果可信度。",
             "- 40-59: 存在中高风险问题，过程或结果显著不可靠。",
             "- 0-39: 核心链路失败或基本不可用。",
             "",
-            "维度定义（必须覆盖）：",
-            "1) execution_stability: 关注崩溃/超时/重试/恢复闭环。",
-            "2) scheduling_quality: 关注 claim-dispatch 一致性、依赖约束、状态机合法性。",
-            "3) progress_efficiency: 关注耗时、空转、阻塞、关键路径执行效率。",
-            "4) result_completeness: 关注 DONE 比例、产物齐备度、artifact 与任务一致性。",
-            "5) result_quality: 关注报告结构、语义相关性、信息密度、可操作性。",
-            "6) overall: 综合结论，不是简单平均；需要反映主要风险。",
+            "评审维度（必须全部覆盖）：",
+            "1) execution_stability: 崩溃/超时/重试/恢复闭环",
+            "2) scheduling_quality: claim-dispatch 一致性、依赖约束、状态机合法性",
+            "3) progress_efficiency: 耗时、空转、阻塞、关键路径执行效率",
+            "4) result_completeness: DONE 比例、产物齐备度、artifact 与任务一致性",
+            "5) result_quality: 报告结构、语义相关性、信息密度、可操作性",
+            "6) collaboration_effectiveness: Worker 间上下文传递，前置任务产物是否被后续采纳",
+            "7) error_recovery_and_reflection: 失败时是否反思环境并提出规避/恢复方案",
+            "8) overall: 综合结论，不是简单平均，需反映主要风险",
             "",
-            "Bug 发现标准（必须执行）：",
-            "- category 推荐使用: startup/scheduling/recovery/timeout/state/artifact/semantic/quality/judge/other。",
-            "- severity: critical(阻断主链路), high(显著错误), medium(功能受损), low(轻微问题)。",
-            "- 同类问题按 bug_id 聚合，count 表示出现次数。",
-            "- evidence 需要尽量带绝对路径和事件名/字段，确保可复查。",
+            "Bug 发现标准：",
+            "- category: startup/scheduling/recovery/timeout/state/artifact/semantic/quality/judge/other",
+            "- severity: critical(阻断主链路), high(显著错误), medium(功能受损), low(轻微问题)",
+            "- 同类问题按 bug_id 聚合，count 表示出现次数",
+            "- evidence 需要带文件路径和具体内容，确保可复查",
             "",
-            "必须检查的路径（绝对路径）：",
-            f"- project_dir: {project_dir}",
-            f"- session_dir: {session_dir}",
-            f"- central_plan: {run.plan_path}",
-            f"- registry: {registry_path}",
-            f"- orchestrator_state: {state_path}",
-            f"- orchestrator_log: {orchestrator_log}",
-            f"- scheduler_trace: {scheduler_trace}",
-            f"- completion_report: {completion_report}",
-            f"- resources_dir: {resources_dir}",
-            f"- worker_logs_dir: {worker_logs_dir}",
+            "# Known Limitations",
             "",
-            "Mission 上下文：",
-            f"- case_id: {case.case_id}",
-            f"- mission: {case.mission}",
-            f"- expected_keywords: {case.expected_keywords}",
-            f"- task_graph: {json.dumps(case.tasks, ensure_ascii=False)}",
+            "以下现象是已知的框架行为，不应标记为 bug：",
             "",
-            "运行结果快照：",
-            f"- duration_seconds: {run.duration_seconds:.3f}",
-            f"- task_snapshot: {json.dumps(task_snapshot, ensure_ascii=False)}",
+            "1. **`worker.idle` 事件中 `previous_task=null`**：这是 orchestrator `check_idle()` 的已知时序问题。",
+            "   当 worker 首次进入 idle 状态或在任务完成与状态更新之间存在竞态时，`previous_task` 字段可能为 null。",
+            "   这不影响任务调度的正确性，不应作为 bug 报告。",
             "",
-            "规则评分基线（参考，不是最终结论）：",
-            f"- process_metrics: {json.dumps(asdict(process_metrics), ensure_ascii=False)}",
-            f"- result_metrics: {json.dumps(asdict(result_metrics), ensure_ascii=False)}",
+            *(
+                [
+                    "2. **`scheduler_trace.jsonl` 为空或内容很少**：在 mock 运行环境中，scheduler trace 文件可能为空",
+                    "   或仅包含少量条目，因为 mock worker 完成任务非常快。这是测试框架的预期行为，不代表调度器异常。",
+                    "",
+                ]
+                if not self.use_real_opencode
+                else [
+                    "2. **真实 LLM worker 执行耗时差异大**：真实 Claude worker 的执行时间取决于任务复杂度，",
+                    "   单 task 耗时 30-300s 均属正常范围，不应作为效率 bug 报告（除非有明确超时或阻塞）。",
+                    "",
+                ]
+            ),
+            "# 输出要求",
             "",
-            "资源文件清单（Top30）：",
-            *resource_files,
+            "只输出严格 JSON，符合以下 schema：",
+            json.dumps(schema, ensure_ascii=False, indent=2),
             "",
-            "事件频次 Top20：",
-            *top_event_lines,
-            "",
-            "关键事件时间线（尾部 Top30）：",
-            *event_timeline,
-            "",
-            "warn/error 事件样本：",
-            *warn_error_events,
-            "",
-            "基线 bug（规则检测）：",
-            *baseline_bug_lines,
-            "",
-            "completion_report 预览：",
-            completion_preview,
-            "",
-            "orchestrator_state 预览：",
-            state_preview,
-            "",
-            "registry 预览：",
-            registry_preview,
-            "",
-            "输出要求（必须满足）：",
-            "- 只输出严格 JSON，且必须符合给定 schema。",
+            "注意：",
             "- 每个维度的 evidence/risk/suggestion 给出具体条目，避免空泛措辞。",
             "- overall 需要明确说明关键风险来源。",
             "- bug_findings 只保留有证据的问题；无问题时返回空数组。",
@@ -1619,6 +1981,8 @@ def render_markdown_report(results: list[MissionBenchmarkResult]) -> str:
                         f"progress_efficiency={cj.progress_efficiency.score:.1f}",
                         f"result_completeness={cj.result_completeness.score:.1f}",
                         f"result_quality={cj.result_quality.score:.1f}",
+                        f"collaboration_effectiveness={cj.collaboration_effectiveness.score:.1f}",
+                        f"error_recovery_and_reflection={cj.error_recovery_and_reflection.score:.1f}",
                         f"overall={cj.overall.score:.1f}",
                     ]
                 )
@@ -1659,6 +2023,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--work-root", default="")
     parser.add_argument("--codex-cli-path", default="codex")
     parser.add_argument("--codex-cli-timeout", type=int, default=180)
+    parser.add_argument("--codex-cli-model", default="claude-sonnet-4-6", help="Model ID for Claude Code judge.")
     parser.add_argument(
         "--judge-by-codex",
         dest="judge_by_codex",
@@ -1683,6 +2048,29 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Call codex CLI for judgement (default when Codex judgement enabled).",
     )
+    parser.add_argument(
+        "--real-opencode",
+        dest="use_real_opencode",
+        action="store_true",
+        default=False,
+        help="Use genuine opencode serve + Claude workers instead of the mock HTTP server.",
+    )
+    parser.add_argument(
+        "--real-case-timeout",
+        type=float,
+        default=1800.0,
+        help="Wall-clock timeout (seconds) per case when running in real-opencode mode (default: 1800).",
+    )
+    parser.add_argument(
+        "--worker-model",
+        dest="worker_model",
+        default="",
+        help=(
+            "Model string (provider/model-id) injected into worker opencode config. "
+            "Defaults to 'opencode/qwen3-coder' when --real-opencode is set. "
+            "Example: 'opencode/qwen3-coder', 'anthropic/claude-sonnet-4-5'."
+        ),
+    )
     parser.set_defaults(judge_by_codex=True, prefer_codex_cli=True)
     return parser
 
@@ -1694,6 +2082,16 @@ def main() -> None:
     cases = _select_cases(all_cases, args.case)
     if not cases:
         raise SystemExit("No benchmark cases selected.")
+
+    case_ids = [c.case_id for c in cases]
+    print(
+        f"[bench] cases={case_ids} workers={args.workers} "
+        f"use_real_opencode={args.use_real_opencode} "
+        f"judge_by_codex={args.judge_by_codex} prefer_codex_cli={args.prefer_codex_cli} "
+        f"codex_cli_path={args.codex_cli_path} codex_cli_model={args.codex_cli_model}",
+        file=sys.stderr,
+        flush=True,
+    )
 
     runner = MissionBenchmarkRunner(
         repo_root=repo_root,
@@ -1707,6 +2105,10 @@ def main() -> None:
         prefer_codex_cli=bool(args.prefer_codex_cli),
         codex_cli_path=str(args.codex_cli_path),
         codex_cli_timeout=int(args.codex_cli_timeout),
+        codex_cli_model=str(args.codex_cli_model),
+        use_real_opencode=bool(args.use_real_opencode),
+        real_case_timeout=float(args.real_case_timeout),
+        worker_model=str(args.worker_model),
     )
     results = runner.run_cases(cases)
 

@@ -30,7 +30,10 @@ import fcntl
 
 TASK_ID_RE = re.compile(r"Task ID:\s*([^\n\r]+)")
 TITLE_RE = re.compile(r"Title:\s*([^\n\r]+)")
-DESCRIPTION_RE = re.compile(r"Description:\s*\n([\s\S]*?)\n\nDetailed report path", flags=re.IGNORECASE)
+DESCRIPTION_RE = re.compile(
+    r"Description:\s*\n([\s\S]*?)\n\n(?:Predecessor Results|Detailed report path)",
+    flags=re.IGNORECASE,
+)
 MISSION_RE = re.compile(r"Mission:\s*([^\n\r.]+)")
 DETAIL_REPORT_RE = re.compile(
     r"Detailed report path \(absolute, required on DONE\):\s*\n([^\n\r]+)",
@@ -265,6 +268,56 @@ class MockRuntime:
                 break
         return result
 
+    @staticmethod
+    def _should_simulate_failure(description: str, mission: str = "") -> bool:
+        """Detect if a task should simulate failure based on description and mission context."""
+        if not description:
+            return False
+
+        # Direct failure signal words in the task description.
+        failure_patterns = [
+            r"不要强行成功",
+            r"写入.*失败原因",
+            r"替代方案",
+            r"缺乏依赖",
+            r"should\s+fail",
+            r"report\s+failure",
+            r"无法完成",
+            r"不应成功",
+        ]
+        for pattern in failure_patterns:
+            if re.search(pattern, description, re.IGNORECASE):
+                return True
+
+        # Verification task in a mission that implies expected dependency failure.
+        # e.g. "尝试 import redis" in a mission stating Redis is not installed.
+        mission_failure_signals = [
+            r"没有安装",
+            r"未安装",
+            r"缺少依赖",
+            r"not installed",
+            r"missing dependency",
+            r"无法使用",
+            r"根本没有",
+        ]
+        task_verify_signals = [
+            r"尝试.{0,10}(import|安装|引入)",
+            r"验证.{0,15}(是否支持|是否可用|能否)",
+            r"检测.{0,15}(是否|能否)",
+            r"try.{0,10}import",
+            r"verify.{0,15}support",
+        ]
+        mission_implies_failure = any(
+            re.search(p, mission, re.IGNORECASE) for p in mission_failure_signals
+        )
+        task_is_verification = any(
+            re.search(p, description, re.IGNORECASE) for p in task_verify_signals
+        )
+        if mission_implies_failure and task_is_verification:
+            return True
+
+        return False
+
     def _mark_task_done(
         self,
         task_id: str,
@@ -309,45 +362,113 @@ class MockRuntime:
 
                 report_path.parent.mkdir(parents=True, exist_ok=True)
                 completed_at = _utc_now_iso()
-                keywords = self._keywords_from_text(" ".join([mission, title, description]))
-                keyword_text = ", ".join(keywords) if keywords else "none"
                 safe_description = description or "No explicit task description."
                 mission_text = mission or "unknown-mission"
-                report_path.write_text(
-                    "\n".join(
-                        [
-                            f"# Report for {task_id}",
-                            "",
-                            "## Task Context",
-                            f"- mission: {mission_text}",
-                            f"- worker: {self.context.agent_name}",
-                            f"- title: {title}",
-                            f"- description: {safe_description}",
-                            "",
-                            "## Execution",
-                            "1. Parsed task instruction from orchestrator prompt.",
-                            "2. Simulated worker execution in mock opencode runtime.",
-                            "3. Persisted DONE status and artifact metadata to central_plan.",
-                            "",
-                            "## Verification",
-                            f"- completed_at: {completed_at}",
-                            "- status_written: DONE",
-                            "- scheduler_visible: yes",
-                            f"- semantic_keywords: {keyword_text}",
-                            "",
-                            "## Artifacts",
-                            f"- report_path: {report_path}",
-                            "",
-                            "## Summary",
-                            f"Task `{task_id}` completed successfully for mission `{mission_text}`.",
-                        ]
+                is_failure = self._should_simulate_failure(safe_description, mission=mission_text)
+
+                # Issue 4: Build predecessor context from dependencies
+                predecessor_lines: list[str] = []
+                target_deps = target.get("dependencies", [])
+                if isinstance(target_deps, list) and target_deps:
+                    tasks_by_id = {
+                        str(t.get("id") or ""): t for t in tasks if isinstance(t, dict)
+                    }
+                    for dep_id in target_deps:
+                        dep_id_str = str(dep_id or "").strip()
+                        dep_task = tasks_by_id.get(dep_id_str)
+                        if dep_task:
+                            dep_summary = str(dep_task.get("result_summary") or "N/A")
+                            dep_artifact = str(dep_task.get("artifact_link") or "N/A")
+                            predecessor_lines.append(f"- {dep_id_str}: summary={dep_summary}")
+                            predecessor_lines.append(f"  artifact: {dep_artifact}")
+
+                # Build report sections
+                report_sections: list[str] = [
+                    f"# Report for {task_id}",
+                    "",
+                    "## Task Context",
+                    f"- mission: {mission_text}",
+                    f"- worker: {self.context.agent_name}",
+                    f"- title: {title}",
+                    f"- description: {safe_description}",
+                ]
+
+                # Issue 4: Add predecessor context section
+                if predecessor_lines:
+                    report_sections.extend([
+                        "",
+                        "## Predecessor Context",
+                        *predecessor_lines,
+                    ])
+
+                # Issue 3: Task-specific execution section
+                desc_summary = safe_description[:120].rstrip(".")
+                if is_failure:
+                    # Issue 1: Failure report
+                    report_sections.extend([
+                        "",
+                        "## Execution",
+                        f"1. Received task `{title}` for mission `{mission_text}`.",
+                        f"2. Analyzed task requirements: {desc_summary}.",
+                        "3. Determined that task cannot be completed as specified.",
+                        "",
+                        "## Failure Analysis",
+                        f"Task `{task_id}` cannot succeed because the required preconditions are not met.",
+                        f"Description indicates: {safe_description}",
+                        "The environment lacks necessary dependencies or capabilities to fulfill this task.",
+                        "",
+                        "## Alternative Proposal",
+                        "- Investigate whether the missing dependency can be installed or substituted.",
+                        "- Consider a fallback implementation that does not require the missing component.",
+                        "- Document the gap and escalate to the mission owner for resolution.",
+                    ])
+                else:
+                    report_sections.extend([
+                        "",
+                        "## Execution",
+                        f"1. Received task `{title}` for mission `{mission_text}`.",
+                        f"2. Analyzed requirements: {desc_summary}.",
+                        "3. Executed task logic in mock opencode runtime.",
+                        "4. Persisted DONE status and artifact metadata to central_plan.",
+                    ])
+
+                report_sections.extend([
+                    "",
+                    "## Verification",
+                    f"- completed_at: {completed_at}",
+                    "- status_written: DONE",
+                    "- scheduler_visible: yes",
+                    "",
+                    "## Artifacts",
+                    f"- report_path: {report_path}",
+                    "",
+                    "## Summary",
+                ])
+
+                if is_failure:
+                    result_summary_text = (
+                        f"{task_id} failed: preconditions not met; "
+                        f"see failure analysis in report: {report_path}"
                     )
-                    + "\n",
+                    report_sections.append(
+                        f"Task `{task_id}` could not be completed for mission `{mission_text}`. "
+                        "See Failure Analysis above."
+                    )
+                else:
+                    result_summary_text = (
+                        f"{task_id} completed by {self.context.agent_name}; report: {report_path}"
+                    )
+                    report_sections.append(
+                        f"Task `{task_id}` completed successfully for mission `{mission_text}`."
+                    )
+
+                report_path.write_text(
+                    "\n".join(report_sections) + "\n",
                     encoding="utf-8",
                 )
 
                 target["status"] = "DONE"
-                target["result_summary"] = f"{task_id} completed by {self.context.agent_name}; report: {report_path}"
+                target["result_summary"] = result_summary_text
                 target["result"] = target["result_summary"]
                 target["artifact_link"] = str(report_path)
                 target["end_time"] = completed_at

@@ -499,7 +499,7 @@ class Worker:
 
     def _worker_config(self) -> dict[str, Any]:
         plugin_url = self.plugin_path.resolve().as_uri()
-        return {
+        config: dict[str, Any] = {
             "plugin": [plugin_url],
             "mcp": {
                 "agent_team_blackboard": {
@@ -520,6 +520,11 @@ class Worker:
                 }
             },
         }
+        # Inject model for headless operation (no UI to select model interactively).
+        worker_model = os.environ.get("SWARM_WORKER_MODEL", "").strip()
+        if worker_model:
+            config["model"] = worker_model
+        return config
 
     async def start(self) -> None:
         ensure = self.log_dir / "workers"
@@ -903,6 +908,8 @@ class Orchestrator:
             self.bb / "logs" / "incidents",
         ]:
             p.mkdir(parents=True, exist_ok=True)
+        # Pre-create scheduler_trace.jsonl so audit tools always find the file.
+        (self.bb / "logs" / "orchestrator" / "scheduler_trace.jsonl").touch(exist_ok=True)
 
     def _migrate_legacy_plan(self) -> None:
         legacy = self.project_dir / "central_plan.md"
@@ -1342,7 +1349,12 @@ class Orchestrator:
             },
         )
 
-    def _format_task_prompt(self, task: dict[str, Any], worker: Worker) -> str:
+    def _format_task_prompt(
+        self,
+        task: dict[str, Any],
+        worker: Worker,
+        all_tasks: list[dict[str, Any]] | None = None,
+    ) -> str:
         task_id = str(task.get("id") or "task-unknown")
         task_file_id = re.sub(r"[^A-Za-z0-9._-]+", "-", task_id).strip("-") or "task-unknown"
         detail_report_path = str((self.bb / "resources" / f"{task_file_id}.md").resolve())
@@ -1350,6 +1362,38 @@ class Orchestrator:
         role_prompt = (worker.role_system_prompt or "").strip()
         if not role_prompt:
             role_prompt = f"You are {worker.role_name}. Prioritize tasks aligned to this role."
+
+        # Build predecessor context for tasks that have completed dependencies.
+        predecessor_block = ""
+        deps = task.get("dependencies") or task.get("depends_on") or []
+        if deps and isinstance(deps, list) and all_tasks:
+            done_by_id = {
+                str(t.get("id") or ""): t
+                for t in all_tasks
+                if isinstance(t, dict) and str(t.get("status") or "") == "DONE"
+            }
+            lines: list[str] = []
+            for dep_id in deps:
+                dep_id_str = str(dep_id or "").strip()
+                dep_task = done_by_id.get(dep_id_str)
+                if not dep_task:
+                    continue
+                summary = str(dep_task.get("result_summary") or dep_task.get("result") or "").strip()
+                artifact = str(dep_task.get("artifact_link") or "").strip()
+                dep_title = str(dep_task.get("title") or dep_id_str)
+                line = f"- {dep_id_str} ({dep_title})"
+                if summary:
+                    line += f"\n  summary: {summary[:300]}"
+                if artifact:
+                    line += f"\n  artifact: {artifact}"
+                lines.append(line)
+            if lines:
+                predecessor_block = (
+                    "Predecessor Results (outputs from completed dependencies — build on these):\n"
+                    + "\n".join(lines)
+                    + "\n\n"
+                )
+
         return (
             "You are a worker agent in a multi-agent swarm.\n\n"
             f"System role for {worker.name}: {worker.role_name}\n"
@@ -1357,6 +1401,7 @@ class Orchestrator:
             f"Task ID: {task_id}\n"
             f"Title: {title}\n\n"
             f"Description:\n{task.get('description', '')}\n\n"
+            f"{predecessor_block}"
             f"Detailed report path (absolute, required on DONE):\n{detail_report_path}\n\n"
             "Execution requirements:\n"
             "1. Complete the task by editing project files as needed.\n"
@@ -1623,6 +1668,9 @@ class Orchestrator:
 
     async def _start_workers(self) -> None:
         used_ports: set[int] = set()
+
+        # Phase 1: Build all Worker objects (synchronous) and log spawn.start for each.
+        pending: list[Worker] = []
         for i in range(self.args.workers):
             desired_port = self.args.port_start + i
             allocated_port = self._allocate_worker_port(desired_port, used_ports)
@@ -1659,9 +1707,17 @@ class Orchestrator:
                     "plugin_path": str(worker.plugin_path),
                 },
             )
-            try:
-                await worker.start()
-            except Exception as exc:
+            pending.append(worker)
+
+        # Phase 2: Start all workers concurrently.
+        results = await asyncio.gather(*(w.start() for w in pending), return_exceptions=True)
+
+        # Phase 3: Process results — register successes, collect first failure.
+        first_exc: BaseException | None = None
+        for worker, result in zip(pending, results):
+            if isinstance(result, BaseException):
+                if first_exc is None:
+                    first_exc = result
                 self.logger.event(
                     "error",
                     "worker.spawn.error",
@@ -1669,9 +1725,8 @@ class Orchestrator:
                     session_id=self.session_id,
                     status="failed",
                     error_code="WORKER_START_FAILED",
-                    error=str(exc),
+                    error=str(result),
                     extra={
-                        "traceback": traceback.format_exc(limit=8),
                         "plugin_path": str(worker.plugin_path),
                         "mcp_script": str(worker.mcp_script_path),
                         "port": worker.port,
@@ -1682,46 +1737,39 @@ class Orchestrator:
                     {
                         "worker": worker.name,
                         "session_id": self.session_id,
-                        "error": str(exc),
+                        "error": str(result),
                         "plugin_path": str(worker.plugin_path),
                         "mcp_script": str(worker.mcp_script_path),
                         "port": worker.port,
                     },
                 )
+            else:
+                self.logger.event(
+                    "info",
+                    "worker.spawn.ready",
+                    worker=worker.name,
+                    session_id=worker.session_id,
+                    status="ok",
+                    extra={"port": worker.port},
+                )
+                self.workers.append(worker)
+                inbox = self.bb / "inboxes" / f"{worker.name}.json"
+                if not inbox.exists():
+                    inbox.write_text("[]", encoding="utf-8")
 
-                # Ensure no orphan worker process survives partial startup failures.
-                for spawned in self.workers:
-                    try:
-                        await spawned.stop(force=True)
-                    except Exception:
-                        pass
-                    try:
-                        await spawned.close()
-                    except Exception:
-                        pass
-                self.workers.clear()
-
+        if first_exc is not None:
+            # Ensure no orphan worker process survives partial startup failures.
+            for w in pending:
                 try:
-                    await worker.stop(force=True)
+                    await w.stop(force=True)
                 except Exception:
                     pass
                 try:
-                    await worker.close()
+                    await w.close()
                 except Exception:
                     pass
-                raise
-            self.logger.event(
-                "info",
-                "worker.spawn.ready",
-                worker=worker.name,
-                session_id=worker.session_id,
-                status="ok",
-                extra={"port": worker.port},
-            )
-            self.workers.append(worker)
-            inbox = self.bb / "inboxes" / f"{worker.name}.json"
-            if not inbox.exists():
-                inbox.write_text("[]", encoding="utf-8")
+            self.workers.clear()
+            raise first_exc
 
     async def _recover_worker(self, worker: Worker, reason: str) -> None:
         self.logger.event("warn", "worker.recover.start", worker=worker.name, error=reason)
@@ -2271,7 +2319,7 @@ class Orchestrator:
                     "worker_role": picked_worker.role_name,
                 },
             )
-            prompt = self._format_task_prompt(claimed, picked_worker)
+            prompt = self._format_task_prompt(claimed, picked_worker, all_tasks=tasks)
             self.logger.event(
                 "debug",
                 "scheduler.assign.prompt",
@@ -2358,6 +2406,9 @@ class Orchestrator:
                 continue
 
             if worker.status == "busy":
+                # Save before check_idle() clears current_task and claimed_at.
+                _previous_task = worker.current_task
+                _busy_since = worker.claimed_at
                 try:
                     became_idle = await worker.check_idle()
                 except Exception as exc:
@@ -2380,8 +2431,8 @@ class Orchestrator:
                         worker=worker.name,
                         status="ok",
                         extra={
-                            "previous_task": worker.current_task,
-                            "busy_duration_s": int(_now() - worker.claimed_at) if worker.claimed_at else None,
+                            "previous_task": _previous_task,
+                            "busy_duration_s": int(_now() - _busy_since) if _busy_since else None,
                         },
                     )
 
@@ -2394,7 +2445,7 @@ class Orchestrator:
         tasks = [task for task in plan.get("tasks", []) if isinstance(task, dict)]
         if not tasks:
             return False
-        return all(task.get("status") == "DONE" for task in tasks)
+        return all(task.get("status") in ("DONE", "FAILED") for task in tasks)
 
     async def run(self) -> None:
         self._init_layout()

@@ -87,7 +87,13 @@ class SwarmRunResult:
 
 
 class SwarmMissionHarness:
-    """Simulate `/swarm <mission>` mission branch with mock opencode servers."""
+    """Run `/swarm <mission>` mission branch with mock or real opencode workers.
+
+    Set ``use_real_opencode=True`` to skip the fake opencode wrapper and let the
+    orchestrator spawn genuine ``opencode serve`` processes.  In that mode the
+    ``mock_task_delay`` parameter is ignored and timeouts should be set much
+    higher (real Claude calls take 30-120 s each).
+    """
 
     def __init__(
         self,
@@ -100,6 +106,8 @@ class SwarmMissionHarness:
         heartbeat_timeout: int = 60,
         mock_task_delay: float = 0.2,
         port_start: int | None = None,
+        use_real_opencode: bool = False,
+        worker_model: str = "",
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.project_dir = Path(project_dir).resolve()
@@ -109,6 +117,8 @@ class SwarmMissionHarness:
         self.heartbeat_timeout = heartbeat_timeout
         self.mock_task_delay = mock_task_delay
         self.port_start = int(port_start) if port_start else _pick_port_start(workers)
+        self.use_real_opencode = use_real_opencode
+        self.worker_model = worker_model.strip()
 
         self.orchestrator_script = self.repo_root / "extension" / "skills" / "swarm" / "scripts" / "orchestrator.py"
         self.mcp_script = self.repo_root / "extension" / "skills" / "swarm" / "scripts" / "blackboard_mcp_server.py"
@@ -122,7 +132,10 @@ class SwarmMissionHarness:
         self._env: dict[str, str] | None = None
         self.events: list[str] = []
 
-        for path in [self.orchestrator_script, self.mcp_script, self.plugin_path, self.mock_server_script]:
+        required_paths = [self.orchestrator_script, self.mcp_script, self.plugin_path]
+        if not use_real_opencode:
+            required_paths.append(self.mock_server_script)
+        for path in required_paths:
             if not path.exists():
                 raise FileNotFoundError(f"Required path missing: {path}")
 
@@ -143,26 +156,34 @@ class SwarmMissionHarness:
         self.project_dir.mkdir(parents=True, exist_ok=True)
         (self.blackboard_dir / "logs" / "orchestrator").mkdir(parents=True, exist_ok=True)
 
-        bin_dir = Path(tempfile.mkdtemp(prefix="swarm-mock-bin-"))
-        wrapper = bin_dir / "opencode"
-        wrapper.write_text(
-            "\n".join(
-                [
-                    "#!/usr/bin/env bash",
-                    f'exec python3 "{self.mock_server_script}" "$@"',
-                    "",
-                ]
-            ),
-            encoding="utf-8",
-        )
-        wrapper.chmod(0o755)
-
         env = dict(os.environ)
-        env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
-        env["SWARM_MOCK_TASK_DELAY"] = str(self.mock_task_delay)
         env["PYTHONUNBUFFERED"] = "1"
 
-        self._mock_bin_dir = bin_dir
+        if self.use_real_opencode:
+            # Real mode: let orchestrator find the genuine opencode binary in PATH.
+            # SWARM_MOCK_TASK_DELAY is not set; real workers run at Claude speed.
+            # Set SWARM_WORKER_MODEL so headless workers have a model without UI.
+            model = self.worker_model or "opencode/qwen3-coder"
+            env.setdefault("SWARM_WORKER_MODEL", model)
+        else:
+            # Mock mode: shadow the opencode binary with our mock HTTP server.
+            bin_dir = Path(tempfile.mkdtemp(prefix="swarm-mock-bin-"))
+            wrapper = bin_dir / "opencode"
+            wrapper.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        f'exec python3 "{self.mock_server_script}" "$@"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            wrapper.chmod(0o755)
+            env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+            env["SWARM_MOCK_TASK_DELAY"] = str(self.mock_task_delay)
+            self._mock_bin_dir = bin_dir
+
         self._env = env
         return env
 
@@ -314,18 +335,21 @@ class SwarmMissionHarness:
             return {}
 
     def wait_until_tasks_done(self, session_id: str, timeout: float = 60.0) -> list[dict[str, Any]]:
+        """Wait until every task reaches a terminal state (DONE or FAILED)."""
         deadline = time.monotonic() + timeout
+        _terminal = {"DONE", "FAILED"}
         while time.monotonic() < deadline:
             plan = self.read_plan(session_id)
             tasks = plan.get("tasks", [])
             if isinstance(tasks, list) and tasks:
                 statuses = [str(task.get("status")) for task in tasks if isinstance(task, dict)]
-                if statuses and all(status == "DONE" for status in statuses):
-                    self.events.append("tasks.done")
+                if statuses and all(s in _terminal for s in statuses):
+                    event = "tasks.done" if all(s == "DONE" for s in statuses) else "tasks.terminal"
+                    self.events.append(event)
                     return [task for task in tasks if isinstance(task, dict)]
             self._assert_orchestrator_alive()
             time.sleep(max(0.2, min(1.0, self.poll_interval)))
-        raise TimeoutError(f"Timed out waiting for all tasks DONE in session {session_id}.")
+        raise TimeoutError(f"Timed out waiting for all tasks terminal in session {session_id}.")
 
     def wait_for_orchestrator_exit(self, timeout: float = 25.0) -> None:
         proc = self._orchestrator_proc
@@ -350,6 +374,13 @@ class SwarmMissionHarness:
         self.panel_on_mock()
 
         session_id = self.wait_for_session(timeout=min(20.0, timeout))
+
+        # Issue 5: Pre-create scheduler_trace.jsonl so LLM judge always finds the file.
+        scheduler_trace = self.session_dir(session_id) / "logs" / "orchestrator" / "scheduler_trace.jsonl"
+        scheduler_trace.parent.mkdir(parents=True, exist_ok=True)
+        if not scheduler_trace.exists():
+            scheduler_trace.touch()
+
         registry = self.read_registry(session_id)
         if registry:
             self.events.append("swarm.status.checked")
