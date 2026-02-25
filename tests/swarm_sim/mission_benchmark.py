@@ -2058,8 +2058,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--real-case-timeout",
         type=float,
-        default=1800.0,
-        help="Wall-clock timeout (seconds) per case when running in real-opencode mode (default: 1800).",
+        default=600.0,
+        help="Wall-clock timeout (seconds) per case when running in real-opencode mode (default: 600).",
     )
     parser.add_argument(
         "--worker-model",
