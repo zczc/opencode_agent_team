@@ -102,8 +102,8 @@ class SwarmMissionHarness:
         *,
         workers: int = 2,
         poll_interval: float = 1.0,
-        task_timeout: int = 60,
-        heartbeat_timeout: int = 60,
+        task_timeout: int = 20,
+        heartbeat_timeout: int = 20,
         mock_task_delay: float = 0.2,
         port_start: int | None = None,
         use_real_opencode: bool = False,
@@ -215,6 +215,8 @@ class SwarmMissionHarness:
             str(self.plugin_path),
             "--mcp-script",
             str(self.mcp_script),
+            "--no-progress-rounds",
+            "8",
         ]
 
     def start_orchestrator(self, mission: str) -> None:
@@ -334,10 +336,18 @@ class SwarmMissionHarness:
         except Exception:
             return {}
 
-    def wait_until_tasks_done(self, session_id: str, timeout: float = 60.0) -> list[dict[str, Any]]:
-        """Wait until every task reaches a terminal state (DONE or FAILED)."""
+    def wait_until_tasks_done(
+        self, session_id: str, timeout: float = 60.0, stall_limit: float = 15.0,
+    ) -> list[dict[str, Any]]:
+        """Wait until every task reaches a terminal state (DONE or FAILED).
+
+        If the plan does not change for *stall_limit* consecutive seconds the
+        wait is aborted early instead of blocking until *timeout*.
+        """
         deadline = time.monotonic() + timeout
         _terminal = {"DONE", "FAILED"}
+        last_signature: str | None = None
+        last_change_time = time.monotonic()
         while time.monotonic() < deadline:
             plan = self.read_plan(session_id)
             tasks = plan.get("tasks", [])
@@ -347,6 +357,17 @@ class SwarmMissionHarness:
                     event = "tasks.done" if all(s == "DONE" for s in statuses) else "tasks.terminal"
                     self.events.append(event)
                     return [task for task in tasks if isinstance(task, dict)]
+
+            # Stall detection: abort early if plan hasn't changed for stall_limit seconds.
+            sig = str(plan)
+            if sig != last_signature:
+                last_signature = sig
+                last_change_time = time.monotonic()
+            elif stall_limit > 0 and (time.monotonic() - last_change_time) > stall_limit:
+                raise TimeoutError(
+                    f"Stalled: plan unchanged for {stall_limit:.0f}s in session {session_id}."
+                )
+
             self._assert_orchestrator_alive()
             time.sleep(max(0.2, min(1.0, self.poll_interval)))
         raise TimeoutError(f"Timed out waiting for all tasks terminal in session {session_id}.")

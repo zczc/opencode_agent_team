@@ -130,7 +130,7 @@ class MissionCase:
     mission: str
     tasks: list[dict[str, Any]]
     expected_keywords: list[str] = field(default_factory=list)
-    timeout: float = 90.0
+    timeout: float = 30.0
 
 
 @dataclass
@@ -361,7 +361,7 @@ def default_mission_cases() -> list[MissionCase]:
                     "assignees": [],
                 },
             ],
-            timeout=120.0,
+            timeout=45.0,
         ),
         # Case 5: Wide fan-out star — 1 root → 4 parallel → 1 aggregator (6 tasks, 3 workers → forces queuing)
         MissionCase(
@@ -595,16 +595,16 @@ class MissionBenchmarkRunner:
         workers: int = 3,
         poll_interval: float = 1.0,
         mock_task_delay: float = 0.15,
-        task_timeout: int = 90,
-        heartbeat_timeout: int = 90,
+        task_timeout: int = 20,
+        heartbeat_timeout: int = 20,
         work_root: Path | None = None,
         judge_by_codex: bool = True,
         prefer_codex_cli: bool = True,
         codex_cli_path: str = "codex",
-        codex_cli_timeout: int = 180,
+        codex_cli_timeout: int = 60,
         codex_cli_model: str = "claude-sonnet-4-6",
         use_real_opencode: bool = False,
-        real_case_timeout: float = 1800.0,
+        real_case_timeout: float = 600.0,
         worker_model: str = "",
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
@@ -620,7 +620,7 @@ class MissionBenchmarkRunner:
         self.codex_cli_timeout = max(30, int(codex_cli_timeout))
         self.codex_cli_model = codex_cli_model.strip() or "claude-sonnet-4-6"
         self.use_real_opencode = use_real_opencode
-        self.real_case_timeout = max(300.0, float(real_case_timeout))
+        self.real_case_timeout = float(real_case_timeout)
         self.worker_model = worker_model.strip()
         self._run_stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
@@ -2015,14 +2015,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--poll-interval", type=float, default=1.0)
     parser.add_argument("--mock-task-delay", type=float, default=0.15)
-    parser.add_argument("--task-timeout", type=int, default=90)
-    parser.add_argument("--heartbeat-timeout", type=int, default=90)
+    parser.add_argument("--task-timeout", type=int, default=20)
+    parser.add_argument("--heartbeat-timeout", type=int, default=20)
     parser.add_argument("--case", action="append", default=[], help="Case id to run (repeatable).")
     parser.add_argument("--json-out", default="")
     parser.add_argument("--md-out", default="")
     parser.add_argument("--work-root", default="")
     parser.add_argument("--codex-cli-path", default="codex")
-    parser.add_argument("--codex-cli-timeout", type=int, default=180)
+    parser.add_argument("--codex-cli-timeout", type=int, default=60)
     parser.add_argument("--codex-cli-model", default="claude-sonnet-4-6", help="Model ID for Claude Code judge.")
     parser.add_argument(
         "--judge-by-codex",

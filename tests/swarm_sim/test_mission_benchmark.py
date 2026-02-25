@@ -25,8 +25,8 @@ class MissionBenchmarkSmokeTests(unittest.TestCase):
             workers=2,
             poll_interval=1.0,
             mock_task_delay=0.15,
-            task_timeout=90,
-            heartbeat_timeout=90,
+            task_timeout=20,
+            heartbeat_timeout=20,
             prefer_codex_cli=False,
         )
         benchmark_result = runner.run_case(case)
